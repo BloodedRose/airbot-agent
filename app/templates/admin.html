@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIRBOT Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="max-w-md mx-auto bg-white p-8 rounded-lg shadow mt-20">
+        <h2 class="text-2xl font-bold mb-6 text-center">Admin Login</h2>
+        <input type="email" id="email" placeholder="Email" class="w-full mb-4 p-2 border rounded">
+        <input type="password" id="password" placeholder="Password" class="w-full mb-6 p-2 border rounded">
+        <button onclick="login()" class="w-full bg-blue-600 text-white p-2 rounded">Login</button>
+        <p id="loginError" class="text-red-500 mt-4 text-center hidden"></p>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="dashboard" class="max-w-4xl mx-auto hidden">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold">Admin Dashboard</h1>
+            <button onclick="logout()" class="text-red-600 font-semibold">Logout</button>
+        </div>
+
+        <!-- Create User -->
+        <div class="bg-white p-6 rounded-lg shadow mb-8">
+            <h2 class="text-xl font-bold mb-4">Create New User</h2>
+            <div class="flex gap-4 mb-4">
+                <input type="text" id="newUserName" placeholder="Name" class="flex-1 p-2 border rounded">
+                <input type="email" id="newUserEmail" placeholder="Email" class="flex-1 p-2 border rounded">
+                <input type="password" id="newUserPwd" placeholder="Password" class="flex-1 p-2 border rounded">
+            </div>
+            <button onclick="createUser()" class="bg-green-600 text-white px-4 py-2 rounded">Create User</button>
+        </div>
+
+        <!-- Access Assignment -->
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-bold mb-4">Assign Access</h2>
+            <div class="mb-4">
+                <label class="block font-semibold mb-1">User ID:</label>
+                <input type="number" id="assignUserId" placeholder="User ID" class="w-full p-2 border rounded">
+            </div>
+            <div class="mb-4">
+                <label class="block font-semibold mb-1">Allowed Models (Comma separated IDs):</label>
+                <input type="text" id="assignModels" placeholder="e.g., 1, 2, 3" class="w-full p-2 border rounded">
+            </div>
+            <div class="mb-6">
+                <label class="block font-semibold mb-1">Allowed MCP Servers (Comma separated IDs):</label>
+                <input type="text" id="assignMCPs" placeholder="e.g., 1, 4" class="w-full p-2 border rounded">
+            </div>
+            <button onclick="assignAccess()" class="bg-blue-600 text-white px-4 py-2 rounded">Update Access</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8000/v1";
+        
+        // Auto-check login state
+        if (localStorage.getItem("token")) {
+            document.getElementById("loginScreen").classList.add("hidden");
+            document.getElementById("dashboard").classList.remove("hidden");
+        }
+
+        async function login() {
+            const formData = new URLSearchParams();
+            formData.append("username", document.getElementById("email").value);
+            formData.append("password", document.getElementById("password").value);
+
+            const res = await fetch(`${API_URL}/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: formData
+            });
+            const data = await res.json();
+            
+            if (res.ok && data.is_admin) {
+                localStorage.setItem("token", data.access_token);
+                location.reload();
+            } else {
+                document.getElementById("loginError").innerText = data.error || "Not an admin";
+                document.getElementById("loginError").classList.remove("hidden");
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            location.reload();
+        }
+
+        async function fetchWithAuth(url, options = {}) {
+            const token = localStorage.getItem("token");
+            options.headers = { ...options.headers, "Authorization": `Bearer ${token}` };
+            return fetch(url, options);
+        }
+
+        async function createUser() {
+            const res = await fetchWithAuth(`${API_URL}/admin/users`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: document.getElementById("newUserName").value,
+                    email: document.getElementById("newUserEmail").value,
+                    password: document.getElementById("newUserPwd").value,
+                    is_admin: false
+                })
+            });
+            if (res.ok) alert("User created!");
+        }
+
+        async function assignAccess() {
+            const userId = document.getElementById("assignUserId").value;
+            const models = document.getElementById("assignModels").value.split(",").map(id => parseInt(id.trim())).filter(id => id);
+            const mcps = document.getElementById("assignMCPs").value.split(",").map(id => parseInt(id.trim())).filter(id => id);
+
+            const res = await fetchWithAuth(`${API_URL}/admin/users/${userId}/access`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model_ids: models, mcp_server_ids: mcps })
+            });
+            if (res.ok) alert("Access updated successfully!");
+        }
+    </script>
+</body>
+</html>

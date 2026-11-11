@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Any, Dict
 
 # --- Configuration Creation Schemas ---
@@ -33,6 +33,8 @@ class AgentResult(BaseModel):
     text: Optional[str] = None
     tool_calls: List[AgentToolCall] = Field(default_factory=list)
     raw_response: Any = Field(default=None, description="The original SDK response object for debugging")
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 # --- Frontend Request Models ---
@@ -49,9 +51,9 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     model_name: str = Field(..., description="The display name of the model")
     mcp_server_names: List[str] = Field(default=[], description="List of MCP server names to connect")
-    
     stream: bool = Field(default=True)
-
+    user_email: str = Field(..., description="Used for access validation (until you implement JWTs)")
+    planner: bool = Field(default=False, description="True for Plan-and-Execute, False for ReAct")
 
 # --- Internal Agent State Models ---
 
@@ -70,6 +72,8 @@ class StateTracker(BaseModel):
     chat_request: ChatRequest
     plan: Optional[Plan] = None
     execution_history: List[Task] = []
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
     
     def mark_task_complete(self, task_id: int, result: Any):
         for task in self.plan.tasks:
@@ -78,3 +82,19 @@ class StateTracker(BaseModel):
                 task.result = result
                 self.execution_history.append(task)
                 break
+
+    def track_usage(self, result: AgentResult):
+        self.total_input_tokens += result.input_tokens
+        self.total_output_tokens += result.output_tokens
+
+#----------- User Models ------------------
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str
+    password: str
+    is_admin: bool = False
+
+class UserAccessUpdate(BaseModel):
+    model_ids: List[int] = Field(default=[], description="List of ModelConfig IDs to assign")
+    mcp_server_ids: List[int] = Field(default=[], description="List of MCPServerConfig IDs to assign")

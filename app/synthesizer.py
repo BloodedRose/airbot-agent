@@ -30,7 +30,7 @@ async def stream_final_response(state: StateTracker, llm_provider: BaseLLMProvid
             if isinstance(chunk, dict) and "error" in chunk:
                 yield f"data: {json.dumps(chunk)}\n\n"
                 break
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'text', 'chunk': chunk})}\n\n"
         yield f"data: {json.dumps({'status': 'done'})}\n\n"
 
     except Exception as e:

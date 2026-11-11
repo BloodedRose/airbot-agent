@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, JSON, Enum
+from sqlalchemy import Column, Integer, String, Boolean, JSON, Enum, Table, ForeignKey
+from sqlalchemy.orm import relationship
 from .database import Base
 import enum
 
@@ -41,3 +42,32 @@ class MCPServerConfig(Base):
     sse_url = Column(String(255), nullable=True) # e.g., "http://localhost:5000/sse"
     
     is_active = Column(Boolean, default=True)
+
+
+#------------------- User Configurations -----------------
+
+user_model_access = Table(
+    "user_model_access",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("model_id", Integer, ForeignKey("model_configs.id"), primary_key=True)
+)
+
+user_mcp_access = Table(
+    "user_mcp_access",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("mcp_id", Integer, ForeignKey("mcp_servers.id"), primary_key=True)
+)
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(100), unique=True, index=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    is_admin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    allowed_models = relationship("ModelConfig", secondary=user_model_access, lazy="selectin")
+    allowed_mcp_servers = relationship("MCPServerConfig", secondary=user_mcp_access, lazy="selectin")

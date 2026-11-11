@@ -1,362 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MCP Streaming Chat</title>
-
-  <!-- Markdown rendering, sanitization, and code highlighting -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b1020;
-      --panel: #111a2e;
-      --panel-2: #17223a;
-      --border: #283653;
-      --text: #e8edf7;
-      --muted: #94a3b8;
-      --accent: #8b9cff;
-      --accent-2: #6678ed;
-      --user: #26375c;
-      --assistant: #141f34;
-      --danger: #ef7777;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-      font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .app { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 100vh; }
-    aside { padding: 24px 18px; background: #0e1729; border-right: 1px solid var(--border); }
-    .brand { font-size: 19px; font-weight: 750; letter-spacing: -.4px; margin-bottom: 6px; }
-    .sub { color: var(--muted); font-size: 12px; margin-bottom: 28px; }
-    label { display: block; color: #c4cee0; font-size: 12px; font-weight: 650; margin: 17px 0 7px; }
-    input, textarea {
-      width: 100%; border: 1px solid var(--border); background: #0a1325; color: var(--text);
-      border-radius: 9px; padding: 10px 11px; outline: none; font: inherit; font-size: 13px;
-    }
-    input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #8b9cff20; }
-    .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
-    .sidebar-actions { display: flex; gap: 8px; margin-top: 24px; }
-    button {
-      border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer;
-      color: white; background: var(--accent-2); font: inherit; font-size: 13px; font-weight: 650;
-    }
-    button:hover { filter: brightness(1.1); }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    button.secondary { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
-    button.stop { background: #6e2d3a; }
-    main { min-width: 0; display: flex; flex-direction: column; height: 100vh; }
-    .topbar { padding: 17px 26px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-    .topbar-title { font-weight: 700; }
-    .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 7px; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
-    .dot.live { background: #4ade80; box-shadow: 0 0 9px #4ade8080; }
-    #chat { flex: 1; overflow-y: auto; padding: 28px max(22px, calc((100% - 900px)/2)); scroll-behavior: smooth; }
-    .welcome { max-width: 650px; margin: 12vh auto 0; text-align: center; }
-    .welcome h1 { font-size: clamp(25px, 4vw, 36px); letter-spacing: -1px; margin-bottom: 8px; }
-    .welcome p { color: var(--muted); }
-    .message { display: flex; gap: 12px; margin: 0 auto 22px; max-width: 900px; align-items: flex-start; }
-    .avatar { flex: 0 0 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-size: 13px; font-weight: 800; background: #29385b; }
-    .message.assistant .avatar { background: #34316a; }
-    .bubble { min-width: 0; max-width: calc(100% - 44px); padding: 13px 16px; border: 1px solid var(--border); border-radius: 4px 13px 13px 13px; background: var(--assistant); overflow-wrap: anywhere; }
-    .message.user .bubble { background: var(--user); border-color: #354a75; }
-    .message.user { flex-direction: row-reverse; }
-    .message.user .bubble { border-radius: 13px 4px 13px 13px; }
-    .bubble p:first-child { margin-top: 0; }
-    .bubble p:last-child { margin-bottom: 0; }
-    .bubble h1, .bubble h2, .bubble h3 { line-height: 1.25; margin: 1.1em 0 .55em; }
-    .bubble h1 { font-size: 1.45em; } .bubble h2 { font-size: 1.25em; } .bubble h3 { font-size: 1.1em; }
-    .bubble a { color: #a9b8ff; }
-    .bubble blockquote { border-left: 3px solid var(--accent); margin: 12px 0; padding: 2px 13px; color: #c0cbe0; }
-    .bubble table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 12px 0; }
-    .bubble th, .bubble td { border: 1px solid #394866; padding: 8px 11px; text-align: left; }
-    .bubble th { background: #25324b; }
-    .bubble code:not(pre code) { background: #26334b; padding: 2px 5px; border-radius: 5px; font-size: .9em; }
-    .bubble pre { background: #0a1020; border: 1px solid #2c3b58; padding: 13px; border-radius: 9px; overflow-x: auto; }
-    .bubble pre code { font-size: 12px; }
-    .bubble img { max-width: 100%; }
-    .composer-wrap { border-top: 1px solid var(--border); padding: 17px 22px 20px; background: #0e1729; }
-    .composer { max-width: 900px; margin: auto; display: flex; gap: 10px; align-items: flex-end; }
-    #prompt { resize: vertical; min-height: 48px; max-height: 180px; font-size: 14px; line-height: 1.5; }
-    .send-col { display: flex; flex-direction: column; gap: 7px; }
-    .footnote { max-width: 900px; margin: 8px auto 0; color: var(--muted); font-size: 11px; }
-    .typing { color: var(--muted); font-size: 12px; }
-    @media (max-width: 760px) {
-      .app { grid-template-columns: 1fr; }
-      aside { border-right: 0; border-bottom: 1px solid var(--border); padding: 15px; }
-      .brand { display: inline-block; margin-right: 8px; }
-      .sub { display: inline; margin: 0; }
-      .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-      .settings-grid .wide { grid-column: 1 / -1; }
-      aside label { margin-top: 10px; }
-      .sidebar-actions { margin-top: 12px; }
-      main { height: calc(100vh - 260px); min-height: 480px; }
-      #chat { padding: 20px 14px; }
-      .topbar { padding: 12px 16px; }
-      .composer-wrap { padding: 12px; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIRBOT Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-container { max-height: 70vh; overflow-y: auto; }
+        .tool-block { font-family: monospace; font-size: 0.85rem; }
+    </style>
 </head>
-<body>
-<div class="app">
-  <aside>
-    <div class="brand">MCP Chat</div><span class="sub">Streaming playground</span>
-    <div class="settings-grid">
-      <div class="wide">
-        <label for="apiUrl">API endpoint</label>
-        <input id="apiUrl" value="http://127.0.0.1:8000/v1/chat" placeholder="http://localhost:8000/v1/chat">
-      </div>
-      <div>
-        <label for="modelName">Model name</label>
-        <input id="modelName" value="Rose" placeholder="Rose">
-      </div>
-      <div>
-        <label for="toolNames">MCP tool names</label>
-        <input id="toolNames" value="python_test" placeholder="python_test, another_tool">
-      </div>
-      <div class="wide hint">Enter multiple tool names separated by commas. These settings are applied to each new request.</div>
-    </div>
-    <div class="sidebar-actions">
-      <button class="secondary" id="clearBtn" type="button">Clear chat</button>
-      <button class="secondary" id="resetBtn" type="button">Reset settings</button>
-    </div>
-  </aside>
+<body class="bg-gray-100 flex h-screen items-center justify-center">
 
-  <main>
-    <header class="topbar">
-      <div class="topbar-title">Conversation</div>
-      <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Ready</span></div>
-    </header>
-    <section id="chat" aria-live="polite">
-      <div class="welcome" id="welcome">
-        <h1>How can I help?</h1>
-        <p>Ask a question and your model response will appear here as it streams.</p>
-      </div>
-    </section>
-    <div class="composer-wrap">
-      <form class="composer" id="chatForm">
-        <textarea id="prompt" placeholder="Message your model… (Enter to send, Shift + Enter for a new line)" required></textarea>
-        <div class="send-col">
-          <button id="sendBtn" type="submit">Send</button>
-          <button id="stopBtn" class="stop" type="button" disabled>Stop</button>
+    <div class="w-full max-w-5xl bg-white shadow-xl rounded-lg overflow-hidden flex flex-col h-[90vh]">
+        <!-- Header -->
+        <div class="bg-blue-800 text-white p-4 flex justify-between items-center">
+            <h1 class="font-bold text-xl">AIRBOT Enterprise</h1>
+            <div class="flex items-center gap-3">
+                <input type="email" id="userEmail" placeholder="Your Email" class="text-black p-1 text-sm rounded w-40">
+                <input type="text" id="modelName" placeholder="Model Name (e.g. gpt-4o)" class="text-black p-1 text-sm rounded w-40">
+                <input type="text" id="mcpNames" placeholder="MCPs (comma sep)" class="text-black p-1 text-sm rounded w-40">
+                <label class="flex items-center gap-1 text-sm whitespace-nowrap">
+                    <input type="checkbox" id="plannerToggle" class="w-4 h-4"> Planner
+                </label>
+            </div>
         </div>
-      </form>
-      <div class="footnote">The conversation history is sent with each request. Markdown is rendered in the chat.</div>
+
+        <!-- Chat Area -->
+        <div id="chatBox" class="chat-container flex-1 p-6 flex flex-col gap-4 bg-slate-50"></div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white border-t flex gap-2">
+            <input type="text" id="userInput" placeholder="Ask the agent..." class="flex-1 p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" onkeypress="handleEnter(event)">
+            <button onclick="sendMessage()" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">Send</button>
+        </div>
     </div>
-  </main>
-</div>
 
-<script>
-  // Configure Marked. Raw HTML is sanitized with DOMPurify before insertion.
-  marked.setOptions({
-    gfm: true,
-    breaks: true,
-    highlight: (code, language) => {
-      if (language && hljs.getLanguage(language)) {
-        try { return hljs.highlight(code, { language }).value; } catch (_) {}
-      }
-      return hljs.highlightAuto(code).value;
-    }
-  });
+    <script>
+        let chatHistory = [];
 
-  const $ = (id) => document.getElementById(id);
-  const chat = $('chat');
-  const history = [];
-  let activeController = null;
+        function appendMessage(role, content) {
+            const div = document.createElement("div");
+            div.className = `p-3 rounded-lg max-w-[80%] ${role === 'user' ? 'bg-blue-100 self-end' : 'bg-white border self-start'}`;
+            div.innerHTML = `<div class="whitespace-pre-wrap">${content}</div>`;
+            document.getElementById("chatBox").appendChild(div);
+            div.scrollIntoView();
+            return div;
+        }
 
-  function setStatus(message, live = false) {
-    $('statusText').textContent = message;
-    $('statusDot').classList.toggle('live', live);
-  }
+        async function sendMessage() {
+            const input = document.getElementById("userInput");
+            const text = input.value.trim();
+            const userEmail = document.getElementById("userEmail").value.trim();
+            
+            if (!text) return;
+            if (!userEmail) {
+                alert("Please enter your email to verify access.");
+                return;
+            }
 
-  function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
+            input.value = "";
+            appendMessage("user", text);
+            chatHistory.push({ role: "user", content: text });
 
-  function addMessage(role, content = '') {
-    $('welcome')?.remove();
-    const wrapper = document.createElement('article');
-    wrapper.className = `message ${role}`;
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar';
-    avatar.textContent = role === 'user' ? 'YOU' : 'AI';
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    wrapper.append(avatar, bubble);
-    chat.appendChild(wrapper);
-    if (content) renderMarkdown(bubble, content);
-    scrollToBottom();
-    return bubble;
-  }
+            const modelName = document.getElementById("modelName").value || "gpt-4o";
+            const mcpInput = document.getElementById("mcpNames").value;
+            const mcps = mcpInput ? mcpInput.split(",").map(s => s.trim()) : [];
+            const usePlanner = document.getElementById("plannerToggle").checked;
 
-  function renderMarkdown(element, markdown) {
-    const html = marked.parse(markdown || '');
-    element.innerHTML = DOMPurify.sanitize(html, {
-      USE_PROFILES: { html: true },
-      ADD_ATTR: ['target', 'rel']
-    });
-    element.querySelectorAll('a').forEach(a => {
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-    });
-    element.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
-  }
+            const payload = {
+                user_email: userEmail,
+                model_name: modelName,
+                mcp_server_names: mcps,
+                planner: usePlanner,
+                stream: true,
+                messages: chatHistory
+            };
 
-  function parseToolNames(value) {
-    return value.split(',').map(name => name.trim()).filter(Boolean);
-  }
+            const responseDiv = appendMessage("assistant", "");
+            const contentContainer = responseDiv.querySelector("div");
+            let assistantText = "";
+            let currentToolDetails = null;
 
-  // Consume SSE frames. Each frame may contain one or more `data:` lines.
-  function processSseFrame(frame, onChunk, onDone) {
-    const dataLines = frame.split(/\r?\n/)
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.slice(5).trimStart());
-    if (!dataLines.length) return;
+            try {
+                const res = await fetch("http://localhost:8000/v1/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
 
-    const data = dataLines.join('\n');
-    if (data === '[DONE]') { onDone(); return; }
+                if (!res.ok) {
+                    const errData = await res.json();
+                    contentContainer.innerHTML = `<span class="text-red-600 font-semibold">Error: ${errData.error || res.statusText}</span>`;
+                    chatHistory.pop();
+                    return;
+                }
 
-    try {
-      const payload = JSON.parse(data);
-      if (typeof payload.chunk === 'string') onChunk(payload.chunk);
-      if (payload.status === 'done') onDone();
-      if (payload.error) throw new Error(payload.error);
-    } catch (error) {
-      // Ignore non-JSON SSE comments/frames, but surface explicit server errors.
-      if (error instanceof SyntaxError) return;
-      throw error;
-    }
-  }
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
 
-  async function readStream(response, onChunk) {
-    if (!response.body) throw new Error('This browser does not support streaming response bodies.');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let completed = false;
-    const done = () => { completed = true; };
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop(); 
 
-    while (true) {
-      const { value, done: streamEnded } = await reader.read();
-      if (streamEnded) break;
-      buffer += decoder.decode(value, { stream: true });
+                    for (const part of parts) {
+                        if (part.startsWith("data: ")) {
+                            const data = JSON.parse(part.substring(6));
+                            
+                            if (data.type === "text") {
+                                assistantText += data.chunk;
+                                let textSpan = contentContainer.querySelector('.response-text');
+                                if (!textSpan) {
+                                    textSpan = document.createElement("span");
+                                    textSpan.className = "response-text";
+                                    contentContainer.appendChild(textSpan);
+                                }
+                                textSpan.innerText = assistantText;
+                            } 
+                            else if (data.type === "tool_call") {
+                                currentToolDetails = document.createElement("details");
+                                currentToolDetails.className = "tool-block bg-slate-100 p-2 my-2 rounded border border-slate-300";
+                                currentToolDetails.innerHTML = `
+                                    <summary class="cursor-pointer text-blue-700 font-semibold mb-1">⚙️ Executing: ${data.name}</summary>
+                                    <div class="text-slate-600 mb-1">Args: ${JSON.stringify(data.args)}</div>
+                                    <div class="tool-result text-green-700 mt-1 pt-1 border-t border-slate-300">Executing...</div>
+                                `;
+                                contentContainer.appendChild(currentToolDetails);
+                            }
+                            else if (data.type === "tool_result") {
+                                if (currentToolDetails) {
+                                    const resDiv = currentToolDetails.querySelector('.tool-result');
+                                    resDiv.innerText = `Result: ${typeof data.result === 'object' ? JSON.stringify(data.result) : data.result}`;
+                                    currentToolDetails = null;
+                                }
+                            }
+                            else if (data.type === "task_start") {
+                                const taskBadge = document.createElement("div");
+                                taskBadge.className = "text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider";
+                                taskBadge.innerText = `▶ Task ${data.task_id}: ${data.description}`;
+                                contentContainer.appendChild(taskBadge);
+                            }
+                            else if (data.type === "done") {
+                                const metrics = document.createElement("div");
+                                metrics.className = "text-xs text-slate-400 mt-3 pt-2 border-t text-right";
+                                metrics.innerText = `Tokens: ${data.input_tokens} In | ${data.output_tokens} Out`;
+                                contentContainer.appendChild(metrics);
+                            }
+                            else if (data.type === "error" || data.type === "fallback") {
+                                const errDiv = document.createElement("div");
+                                errDiv.className = `p-2 mt-2 text-sm rounded ${data.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`;
+                                errDiv.innerText = `${data.message} ${data.details ? '- ' + data.details : ''}`;
+                                contentContainer.appendChild(errDiv);
+                            }
+                        }
+                    }
+                    responseDiv.scrollIntoView();
+                }
+                
+                chatHistory.push({ role: "assistant", content: assistantText });
 
-      // SSE events are separated by a blank line. Handle LF and CRLF.
-      let boundary;
-      while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
-        const frame = buffer.slice(0, boundary);
-        const separator = buffer.slice(boundary).match(/^\r?\n\r?\n/)[0];
-        buffer = buffer.slice(boundary + separator.length);
-        processSseFrame(frame, onChunk, done);
-      }
-      if (completed) break;
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) processSseFrame(buffer, onChunk, done);
-  }
+            } catch (err) {
+                contentContainer.innerHTML += `<div class="text-red-500 mt-2">Connection failed.</div>`;
+                chatHistory.pop();
+            }
+        }
 
-  async function sendMessage(text) {
-    const apiUrl = $('apiUrl').value.trim();
-    const modelName = $('modelName').value.trim();
-    const mcpServerNames = parseToolNames($('toolNames').value);
-    if (!apiUrl || !modelName) {
-      alert('Please provide both an API endpoint and a model name.');
-      return;
-    }
-
-    history.push({ role: 'user', content: text });
-    addMessage('user', text);
-    const assistantBubble = addMessage('assistant', '');
-    let assistantText = '';
-
-    activeController = new AbortController();
-    $('sendBtn').disabled = true;
-    $('stopBtn').disabled = false;
-    setStatus('Generating…', true);
-
-    const payload = {
-      model_name: modelName,
-      mcp_server_names: mcpServerNames,
-      messages: history.map(message => ({ ...message }))
-    };
-
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Accept': 'text/event-stream, application/json, */*',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        signal: activeController.signal
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
-      }
-
-      await readStream(response, chunk => {
-        assistantText += chunk;
-        renderMarkdown(assistantBubble, assistantText);
-        scrollToBottom();
-      });
-
-      if (assistantText.trim()) history.push({ role: 'assistant', content: assistantText });
-      else if (!assistantText) assistantBubble.textContent = 'The stream ended without any text chunks.';
-      setStatus('Ready');
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        setStatus('Generation stopped');
-        if (assistantText.trim()) history.push({ role: 'assistant', content: assistantText });
-      } else {
-        setStatus('Request failed');
-        const errorNode = document.createElement('p');
-        errorNode.style.color = 'var(--danger)';
-        errorNode.textContent = `Error: ${error.message}`;
-        assistantBubble.appendChild(errorNode);
-      }
-    } finally {
-      activeController = null;
-      $('sendBtn').disabled = false;
-      $('stopBtn').disabled = true;
-      scrollToBottom();
-    }
-  }
-
-  $('chatForm').addEventListener('submit', event => {
-    event.preventDefault();
-    const text = $('prompt').value.trim();
-    if (!text || activeController) return;
-    $('prompt').value = '';
-    sendMessage(text);
-  });
-
-  $('prompt').addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      $('chatForm').requestSubmit();
-    }
-  });
-
-  $('stopBtn').addEventListener('click', () => activeController?.abort());
-
-  $('clearBtn').addEventListener('click', () => {
-    if (activeController) activeController.abort();
-    history.length = 0;
-    chat.innerHTML = '<div class="welcome" id="welcome"><h1>How can I help?</h1><p>Ask a question and your model response will appear here as it streams.</p></div>';
-    setStatus('Ready');
-  });
-
-  $('resetBtn').addEventListener('click', () => {
-    $('apiUrl').value = 'http://127.0.0.1:8000/v1/chat';
-    $('modelName').value = 'Rose';
-    $('toolNames').value = 'python_test';
-  });
-</script>
+        function handleEnter(e) {
+            if (e.key === "Enter") sendMessage();
+        }
+    </script>
 </body>
 </html>

@@ -53,21 +53,41 @@ class OllamaAdapter(BaseLLMProvider):
                 tools=tools, 
                 think=False
             )
-            msg_obj = response.get("message", {})
-            raw_tool_calls = msg_obj.get("tool_calls", [])
+            if hasattr(response, 'message'):
+                msg_obj = response.message
+                text_content = getattr(msg_obj, 'content', "")
+                raw_tool_calls = getattr(msg_obj, 'tool_calls', []) or []
+                input_tokens = getattr(response, 'prompt_eval_count', 0) or 0
+                output_tokens = getattr(response, 'eval_count', 0) or 0
+            else:
+                msg_obj = response.get("message", {})
+                text_content = msg_obj.get("content", "")
+                raw_tool_calls = msg_obj.get("tool_calls", []) or []
+                input_tokens = response.get("prompt_eval_count", 0) or 0
+                output_tokens = response.get("eval_count", 0) or 0
             normalized_calls = []
             if raw_tool_calls:
                 for tc in raw_tool_calls:
-                    func = tc.get("function", {})
+                    if hasattr(tc, 'function'):
+                        func = tc.function
+                        name = getattr(func, 'name', "")
+                        args = getattr(func, 'arguments', {})
+                    else:
+                        func = tc.get("function", {})
+                        name = func.get("name", "")
+                        args = func.get("arguments", {})
+                    
                     normalized_calls.append(AgentToolCall(
                         id=None,
-                        name=func.get("name", ""),
-                        args=func.get("arguments", {})
-                    )) 
+                        name=name,
+                        args=args
+                    ))
             return AgentResult(
-                text=msg_obj.get("content"),
+                text=text_content,
                 tool_calls=normalized_calls,
-                raw_response=response
+                raw_response=response,
+                input_tokens=input_tokens,    # <-- NOW POPULATED
+                output_tokens=output_tokens   # <-- NOW POPULATED
             )
         except Exception as e:
             return {
