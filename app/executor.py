@@ -3,6 +3,7 @@ from typing import List, Dict, Any, AsyncGenerator
 from .models import StateTracker, Message
 from .providers.base import BaseLLMProvider
 from .tools.registry import tool_registry
+from .tools.artifact_service import export_dataset, process_odata_execution_result
 
 def _build_execution_context(state: StateTracker) -> str:
     """Builds a summary of previously completed tasks to feed into the current step."""
@@ -34,7 +35,6 @@ async def execute_plan(state: StateTracker, llm_provider: BaseLLMProvider, avail
             if isinstance(agent_result, dict) and "error" in agent_result:
                 yield f"data: {json.dumps({'type': 'error', 'details': agent_result})}\n\n"
                 return
-            print(agent_result)
             state.track_usage(agent_result)
 
             if agent_result.text:
@@ -44,16 +44,45 @@ async def execute_plan(state: StateTracker, llm_provider: BaseLLMProvider, avail
                 state.mark_task_complete(task.task_id, result={"text_output": agent_result.text})
                 continue
             task_results = []
-            for tc in agent_result.tool_calls:
+            for tc in agent_result.tool_calls: # First loop to stream the tool calling straight to the ui for smoother streaming.
                 yield f"data: {json.dumps({'type': 'tool_call', 'name': tc.name, 'args': tc.args})}\n\n"
-                execution_result = await tool_registry.execute(tc.name, tc.args)
-                yield f"data: {json.dumps({'type': 'tool_result', 'name': tc.name, 'result': execution_result})}\n\n"
-
-                task_results.append({
-                    "tool": tc.name,
-                    "args": tc.args,
-                    "output": execution_result
-                })
+            for tc in agent_result.tool_calls: # Second loop to do our manual maskings, tool diversion.
+                if tc.name == "export_dataset":
+                    execution_result = await export_dataset(file_id=tc.args.get("file_id"), export_type=tc.args.get("export_type"))
+                    print(execution_result)
+                else:
+                    execution_result = await tool_registry.execute(tc.name, tc.args)
+                llm_friendly_result = execution_result
+                ui_stream_result = execution_result
+                parsed_result = execution_result
+                if isinstance(execution_result, str):
+                    try:
+                        parsed_result = json.loads(execution_result)
+                    except Exception:
+                        pass
+                if isinstance(parsed_result, dict):
+                    if "llm_summary" in parsed_result:
+                        llm_friendly_result = parsed_result["llm_summary"]    
+                    elif parsed_result.get("response_type") == "data" and parsed_result.get("status") != "error":
+                        masked_result: dict = await process_odata_execution_result(execution_result=parsed_result)
+                        ui_stream_result = masked_result
+                        artifact_summaries = []
+                        for artifact in masked_result.get("artifacts", []):
+                            f_id = artifact.get('file_id')
+                            query = artifact.get('odata_query', 'N/A')
+                            file_url = f"http://127.0.0.1:8000/v1/files/{f_id}"
+                            artifact_summaries.append(f"File ID: {f_id} (Query: {query}) - Download: {file_url}")     
+                        artifacts_str = " | ".join(artifact_summaries)
+                        llm_friendly_result = f"Data retrieved successfully. Tell the user they can download it. Do not show sample data. Artifacts available: {artifacts_str}"
+                    elif parsed_result.get("response_type") == "file":
+                        artifact_details = parsed_result.get("artifacts", [{}])
+                        f_id = artifact_details[0].get('file_id')
+                        file_url = f"http://127.0.0.1:8000/v1/files/{f_id}"
+                        llm_friendly_result = f"The file has been generated in the desired format and already sent to the UI for download. Tell the user they can download it here: {file_url} and this is the file_id of file where data is stored: {f_id}"  
+                    elif parsed_result.get("response_type") == "chart" or "plotly_data" in parsed_result:
+                        llm_friendly_result = "Chart generated successfully and is already displayed on the user's screen. Acknowledge this, but do not output any chart data."
+                yield f"data: {json.dumps({'type': 'tool_result', 'name': tc.name, 'result': ui_stream_result})}\n\n"
+                task_results.append({"tool": tc.name,"args": tc.args,"output": llm_friendly_result})
             state.mark_task_complete(task.task_id, result=task_results)
 
     except Exception as e:

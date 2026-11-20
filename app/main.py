@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Depends, Request, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from .database import get_db, init_db
 from .crud import get_model_config, create_model_config, create_mcp_config, get_mcp_configs, get_all_mcp_configs, get_all_model_configs
-from .models import ChatRequest, StateTracker, ModelConfigCreate, MCPServerConfigCreate, UserCreate, UserAccessUpdate
+from .models import ChatRequest, StateTracker, ModelConfigCreate, MCPServerConfigCreate, UserCreate, UserAccessUpdate, TableRequest
 from .schema import User, ModelConfig, MCPServerConfig
 from .providers.factory import get_llm_provider
 from .planner import generate_plan
@@ -16,7 +16,9 @@ from fastapi.templating import Jinja2Templates
 from .react import run_react_agent
 from fastapi.security import OAuth2PasswordRequestForm
 from .auth import verify_password, create_access_token, get_current_user
-import json
+from .tools.database_repositry import get_artifact
+from .tools.artifact_service import export_dataset
+import json, math, os
 
 
 app = FastAPI(title="Helium")
@@ -121,6 +123,62 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
     except Exception as e:
         return JSONResponse(status_code=500,content={"message": "Critical server error in chat endpoint", "error": str(e),"status_code": 500})
 
+
+@app.post("/v1/get_table_response/")
+async def load_table_files(request:Request, payload:TableRequest):
+    try:
+        if payload.page < 1:
+            raise ValueError("Page must be greater than or equal to 1")
+        if payload.page_size < 1:
+            raise ValueError("Page size must be greater than or equal to 1")
+        data= await get_artifact(file_id=payload.file_id)
+        file_path= data.storage_path
+        with open(file_path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        records = data if isinstance(data, list) else data.get("data", [])
+        if not isinstance(records, list):
+            raise ValueError("JSON table data must be a list")
+        total_records = len(records)
+        total_pages = math.ceil(total_records / payload.page_size)
+        start_index = (payload.page - 1) * payload.page_size
+        end_index = start_index + payload.page_size
+        paginated_data = records[start_index:end_index]
+        return JSONResponse(status_code=200, content={"data": paginated_data,
+            "pagination": {
+                "current_page": payload.page,
+                "page_size": payload.page_size,
+                "total_records": total_records,
+                "total_pages": total_pages,
+                "has_next": payload.page < total_pages,
+                "has_previous": payload.page > 1
+            }
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error":f"An error occured while fetching the file data, error: {e}"})
+
+
+
+@app.get("/v1/files/{file_id}")
+async def download_file(file_id: str, export: bool = Query(default=False), export_format: str = Query(default="json")):
+    try:
+        if export:
+            if export_format is None:
+                return JSONResponse(status_code=404, content={"message":"Export format is mandatory to export the fields"})
+            file_details= await export_dataset(file_id=file_id, export_type=export_format, tool_call=False)
+            if isinstance(file_details, dict) and  file_details["status"]=="error":
+                return JSONResponse(status_code=500, content=file_details)
+            file_path, file_name = file_details
+        else:
+            data= await get_artifact(file_id=file_id)
+            file_path= data.storage_path
+            file_name= data.filename
+        if not os.path.exists(file_path):
+            return JSONResponse(status_code=404, content={"error": "File not found or expired"})
+        return FileResponse(path=file_path, filename=file_name, media_type="application/octet-stream", content_disposition_type="attachment")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # -------- Information Endpoints ---------
 
 @app.get("/v1/models")
@@ -198,7 +256,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
 @app.post("/v1/admin/users")
 async def create_user(user_data: UserCreate, db: AsyncSession = Depends(get_db), current_admin: User = Depends(get_current_user)):
     try:
-        # In a real app, hash the password here
         new_user = User(
             email=user_data.email,
             name=user_data.name,

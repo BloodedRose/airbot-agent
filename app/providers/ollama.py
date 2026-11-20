@@ -1,4 +1,4 @@
-import json
+import json, copy
 from typing import Dict, Any, List, Optional
 from ollama import AsyncClient
 from app.providers.base import BaseLLMProvider
@@ -8,6 +8,30 @@ class OllamaAdapter(BaseLLMProvider):
     def __init__(self, model_name: str, host: str = "http://localhost:11434", headers: dict = None):
         super().__init__(model_name)
         self.client = AsyncClient(host=host, headers=headers or {})
+
+    def _sanitize_tools_for_ollama(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Strips advanced JSON schema features (anyOf, additionalProperties) that crash Ollama."""
+        clean_tools = copy.deepcopy(tools)
+        def _clean_node(node):
+            if not isinstance(node, dict):            # 1. Resolve anyOf unions (defaulting to the first valid type)
+                return
+            if "anyOf" in node and isinstance(node["anyOf"], list):
+                node["type"] = node["anyOf"][0].get("type", "string")
+                del node["anyOf"]
+            for key in ["additionalProperties", "default", "title"]:
+                if key in node:
+                    del node[key]
+            for k, v in node.items():
+                if isinstance(v, dict):
+                    _clean_node(v)
+                elif isinstance(v, list):
+                    for item in v:
+                        _clean_node(item)
+
+        for tool in clean_tools:
+            _clean_node(tool.get("function", {}).get("parameters", {}))
+
+        return clean_tools
 
     def _format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
         formatted = []
@@ -32,6 +56,7 @@ class OllamaAdapter(BaseLLMProvider):
             response = await self.client.chat(
                 model=self.model_name,
                 messages=formatted_messages,
+                think=False,
                 format=schema,
                 options={"temperature": 0.0} # Low temperature for reliable planning
             )
@@ -47,10 +72,12 @@ class OllamaAdapter(BaseLLMProvider):
 
     async def invoke_tool_agent(self, messages: List[Message], tools: List[Dict[str, Any]]) -> AgentResult | dict:
         try:
+            safe_tools = self._sanitize_tools_for_ollama(tools) if tools else None
+            print("DEBUG-MESSAGE:/n",self._format_messages(messages), "\n")
             response = await self.client.chat(
                 model=self.model_name,
                 messages=self._format_messages(messages),
-                tools=tools, 
+                tools=safe_tools, 
                 think=False
             )
             if hasattr(response, 'message'):
@@ -86,8 +113,8 @@ class OllamaAdapter(BaseLLMProvider):
                 text=text_content,
                 tool_calls=normalized_calls,
                 raw_response=response,
-                input_tokens=input_tokens,    # <-- NOW POPULATED
-                output_tokens=output_tokens   # <-- NOW POPULATED
+                input_tokens=input_tokens,
+                output_tokens=output_tokens
             )
         except Exception as e:
             return {

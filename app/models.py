@@ -98,3 +98,10 @@ class UserCreate(BaseModel):
 class UserAccessUpdate(BaseModel):
     model_ids: List[int] = Field(default=[], description="List of ModelConfig IDs to assign")
     mcp_server_ids: List[int] = Field(default=[], description="List of MCPServerConfig IDs to assign")
+
+#---------- Table Request -------------------
+
+class TableRequest(BaseModel):
+    file_id:str
+    page:int
+    page_size:int

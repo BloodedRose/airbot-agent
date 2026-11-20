@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
-# Replace with your actual MySQL credentials
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_async_engine(DATABASE_URL, echo=False)

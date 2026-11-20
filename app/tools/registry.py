@@ -34,12 +34,4 @@ class ToolRegistry:
                 "status_code": 500
             }
 
-# Global registry instance
 tool_registry = ToolRegistry()
-
-# --- Example Local Tool ---
-def get_weather(location: str) -> dict:
-    # Mock weather tool
-    return {"location": location, "temperature": "32°C", "condition": "Sunny"}
-
-tool_registry.register("get_weather", get_weather)

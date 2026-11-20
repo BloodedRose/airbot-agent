@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, Boolean, JSON, Enum, Table, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Boolean, JSON, Enum, Table, ForeignKey, BigInteger, Text, DateTime, Index
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .database import Base
-import enum
+import enum, uuid
+from datetime import datetime
 
 class ProviderEnum(str, enum.Enum):
     ollama = "ollama"
@@ -71,3 +72,60 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     allowed_models = relationship("ModelConfig", secondary=user_model_access, lazy="selectin")
     allowed_mcp_servers = relationship("MCPServerConfig", secondary=user_mcp_access, lazy="selectin")
+
+
+#--------------------------- Artifacts Configurations -----------------
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("file"))
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    extension: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    row_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    column_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    schema_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), default="unknown")
+    source_query_context_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("query_contexts.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class QueryContext(Base):
+    __tablename__ = "query_contexts"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("qry"))
+    conversation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    service_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    query_plan: Mapped[dict] = mapped_column(JSON, nullable=False)
+    metadata_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+class QueryExecution(Base):
+    __tablename__ = "query_executions"
+    __table_args__ = (
+        Index("ix_query_exec_context_created", "query_context_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("exec"))
+    query_context_id: Mapped[str] = mapped_column(String(80), ForeignKey("query_contexts.id"), nullable=False)
+    parent_execution_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    operation: Mapped[str] = mapped_column(String(32), default="new")
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    odata_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("artifacts.id"), nullable=True)
+    row_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

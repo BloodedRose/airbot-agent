@@ -7,7 +7,7 @@ from app.tools.registry import tool_registry
 async def _execute_remote_tool(sse_url: str, tool_name: str, arguments: Dict[str, Any], headers: Dict[str, str]) -> Any:
     """Connects to the MCP server, executes the specific tool, and extracts the text result."""
     try:
-        async with streamable_http_client(sse_url, headers=headers) as (read_stream, write_stream):
+        async with streamable_http_client(sse_url) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.call_tool(name=tool_name, arguments=arguments)
@@ -15,7 +15,6 @@ async def _execute_remote_tool(sse_url: str, tool_name: str, arguments: Dict[str
                 for content in result.content:
                     if content.type == "text":
                         parsed_text.append(content.text)
-                        
                 return "\n".join(parsed_text)
     except Exception as e:
         return {
@@ -38,7 +37,7 @@ async def fetch_and_register_mcp_tools(mcp_configs: List[MCPServerConfig]) -> Li
     for config in mcp_configs:
         if config.transport.value not in ["sse", "streamable-http"] or not config.sse_url:
             continue
-            
+
         print(f"Connecting to MCP Server: {config.name} at {config.sse_url}")
         auth_headers = config.env or {}
         try:

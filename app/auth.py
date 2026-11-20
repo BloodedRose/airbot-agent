@@ -1,4 +1,4 @@
-import jwt
+import jwt, os
 from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from .schema import User
 from .database import get_db
+from dotenv import load_dotenv
+load_dotenv()
 
-SECRET_KEY = "fGmIkBKMgH3Qfe8D2C15N5HKjqM55w4RJHiXMuU8X2H"
-ALGORITHM = "HS256"
+SECRET_KEY = os.environ["SECRET_KEY"]
+ALGORITHM = os.environ["ALGORITHM"]
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

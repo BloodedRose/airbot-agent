@@ -27,8 +27,6 @@ class AnthropicAdapter(BaseLLMProvider):
     async def generate_structured_json(self, messages: List[Message], schema: Dict[str, Any]) -> Any:
         try:
             system, formatted = self._extract_system_and_messages(messages)
-            
-            # Anthropic handles JSON schema best by forcing a tool call constraint
             tool = {
                 "name": "output_json",
                 "description": "Output the final result matching the schema",
@@ -44,8 +42,6 @@ class AnthropicAdapter(BaseLLMProvider):
                 max_tokens=4096,
                 temperature=0.0
             )
-            
-            # Extract the arguments from the forced tool call
             for block in response.content:
                 if block.type == "tool_use":
                     return block.input
@@ -62,7 +58,7 @@ class AnthropicAdapter(BaseLLMProvider):
         try:
             system, formatted = self._extract_system_and_messages(messages)
             
-            # Note: You will need a helper elsewhere to convert OpenAI-style tool schemas to Anthropic's 'input_schema'
+            # Note: We will need a helper function elsewhere to convert OpenAI-style tool schemas to Anthropic's 'input_schema'
             response = await self.client.messages.create(
                 model=self.model_name,
                 system=system,
