@@ -3,7 +3,7 @@ from typing import AsyncGenerator, List, Dict, Any
 from .models import StateTracker, Message
 from .providers.base import BaseLLMProvider
 from .tools.registry import tool_registry
-from .tools .artifact_service import process_odata_execution_result, export_dataset
+from .tools .artifact_service import process_odata_execution_result, export_dataset, get_file_schema, load_file_generate_chart
 
 #Refusal Regex's
 REFUSAL_REGEX = re.compile(
@@ -38,6 +38,12 @@ async def run_react_agent(state: StateTracker, llm_provider: BaseLLMProvider, av
             for tc in agent_result.tool_calls: # Second loop to do our manual maskings, tool diversion.
                 if tc.name == "export_dataset":
                     execution_result = await export_dataset(file_id=tc.args.get("file_id"), export_type=tc.args.get("export_type"))
+                elif tc.name =="get_file_schema":
+                    execution_result = await get_file_schema(file_id=tc.args.get("file_id"))
+                    print("Schema Response:\n",execution_result)
+                elif tc.name == "generate_plotly_chart":
+                    execution_result = await load_file_generate_chart(file_id=tc.args.get("file_id"), code=tc.args.get("code"))
+                    print("Plotly Response:\n",execution_result)
                 else:
                     execution_result = await tool_registry.execute(tc.name, tc.args)
                 llm_friendly_result = execution_result
@@ -62,12 +68,12 @@ async def run_react_agent(state: StateTracker, llm_provider: BaseLLMProvider, av
                             artifact_summaries.append(f"File ID: {f_id} (Query: {query}) - Download: {file_url}")
                         artifacts_str = " | ".join(artifact_summaries)
                         llm_friendly_result = f"Data retrieved successfully. Tell the user they can download it. Do not show sample data. Artifacts available: {artifacts_str}" 
-                    elif parsed_result.get("response_type") == "file":
+                    elif parsed_result.get("response_type") == "file" and parsed_result.get("status") != "error":
                         artifact_details = parsed_result.get("artifacts", [{}])
                         f_id = artifact_details[0].get('file_id')
                         file_url = f"http://127.0.0.1:8000/v1/files/{f_id}"
                         llm_friendly_result = f"The file has been generated in the desired format and already sent to the UI for download. Tell the user they can download it here: {file_url} and this is the file_id of file where data is stored: {f_id}"
-                    elif parsed_result.get("response_type") == "chart" or "plotly_data" in parsed_result:
+                    elif parsed_result.get("response_type") == "chart" and parsed_result.get("status") != "error":
                         llm_friendly_result = "Chart generated successfully and is already displayed on the user's screen. Acknowledge this, but do not output any chart data."
 
                 yield f"data: {json.dumps({'type': 'tool_result', 'name': tc.name, 'result': ui_stream_result})}\n\n"

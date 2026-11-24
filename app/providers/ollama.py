@@ -72,6 +72,7 @@ class OllamaAdapter(BaseLLMProvider):
 
     async def invoke_tool_agent(self, messages: List[Message], tools: List[Dict[str, Any]]) -> AgentResult | dict:
         try:
+            print("DEBUG-TOOL:/n", tools)
             safe_tools = self._sanitize_tools_for_ollama(tools) if tools else None
             print("DEBUG-MESSAGE:/n",self._format_messages(messages), "\n")
             response = await self.client.chat(

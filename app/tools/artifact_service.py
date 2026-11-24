@@ -1,4 +1,4 @@
-import uuid, os
+import uuid, os, httpx
 import pandas as pd
 from typing import Literal
 from pathlib import Path
@@ -173,3 +173,24 @@ async def export_dataset(file_id: str, export_type: Literal["csv","excel","html"
             return file_details
     except Exception as e:
         return {"status": "error", "message": f"Dataset export failed: {str(e)}"}
+
+
+async def get_file_schema(file_id:str)-> dict:
+    try:
+        file_data = await get_artifact(file_id=file_id)
+        return file_data.schema_json
+    except Exception as e:
+        return {"status": "error", "message": f"Schema fetch failed: {str(e)}"}
+
+async def load_file_generate_chart(file_id:str, code:str)->dict:
+    try:
+        file_data = await get_artifact(file_id=file_id)
+        sandbox_url = "http://localhost:8001/execute"
+        async with httpx.AsyncClient() as client:
+            with open(file_data.storage_path, "rb") as f:
+                files = {"file": ("dataset.json", f, "application/json")}
+                data = {"code": code}
+                response = await client.post(sandbox_url, files=files, data=data, timeout=20.0)                
+                return response.json()
+    except Exception as e:
+        return {"status": "error", "message": f"Chart generation failed: {str(e)}"}
