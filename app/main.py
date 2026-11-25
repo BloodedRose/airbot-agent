@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Depends, Request, Query
+from fastapi import FastAPI, Depends, Request, Query, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from .database import get_db, init_db
 from .crud import get_model_config, create_model_config, create_mcp_config, get_mcp_configs, get_all_mcp_configs, get_all_model_configs
-from .models import ChatRequest, StateTracker, ModelConfigCreate, MCPServerConfigCreate, UserCreate, UserAccessUpdate, TableRequest
+from .models import ChatRequest, StateTracker, ModelConfigCreate, MCPServerConfigCreate, UserCreate, UserAccessUpdate, TableRequest, Message
 from .schema import User, ModelConfig, MCPServerConfig
 from .providers.factory import get_llm_provider
 from .planner import generate_plan
@@ -18,12 +18,13 @@ from fastapi.security import OAuth2PasswordRequestForm
 from .auth import verify_password, create_access_token, get_current_user
 from .tools.database_repositry import get_artifact
 from .tools.artifact_service import export_dataset
+from .tools.helpers import RedisPython
 import json, math, os
 
 
 app = FastAPI(title="Helium")
 render= Jinja2Templates(directory="app/templates").TemplateResponse
-
+redis_client = RedisPython()
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,7 +67,7 @@ async def add_mcp_config(config: MCPServerConfigCreate, db: AsyncSession = Depen
 # ------- Main Orchestrator Endpoint -------
 
 @app.post("/v1/chat")
-async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat_endpoint(request: ChatRequest, background_tasks:BackgroundTasks, db: AsyncSession = Depends(get_db)):
     try:
         user_result = await db.execute(select(User).where(User.email == request.user_email, User.is_active == True))
         user = user_result.scalar_one_or_none()
@@ -94,11 +95,21 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
             if isinstance(llm_provider, dict) and "error" in llm_provider:
                 yield f"data: {json.dumps(llm_provider)}\n\n"
                 return
-            state = StateTracker(chat_request=request)
+            history_dicts = await redis_client.get_mapped_history(request.chat_id, turns=3)
+            history = [Message(**msg) for msg in history_dicts]
+            print("HISTORY:\n \n", history, "\n \n")
+            history_length = len(history) 
+            history.append(Message(role="user", content=request.user_text))
+            state = StateTracker(chat_request=ChatRequest(user_text=request.user_text, chat_id=request.chat_id, model_name=request.model_name, 
+                    user_email=request.user_email, mcp_server_names=request.mcp_server_names, 
+                    planner=request.planner))
+            state.chat_request_messages = history
+            final_assistant_text = ""
             try:
                 if not request.planner:
                     async for event in run_react_agent(state, llm_provider, available_tools):
                         yield event
+                    # print("STATE:\n", state.chat_request_messages)
                 else:
                     plan_result = await generate_plan(state, llm_provider, available_tools)
                     if isinstance(plan_result, dict) and "error" in plan_result:
@@ -108,6 +119,13 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
                         yield execution_event
                     async for chunk in stream_final_response(state, llm_provider):
                         yield chunk
+                        try:
+                            data = json.loads(chunk.replace("data: ", "").strip())
+                            if data.get("type") == "text":
+                                final_assistant_text += data.get("chunk", "")
+                        except Exception:
+                            pass
+                    state.chat_request_messages.append(Message(role="assistant", content=final_assistant_text))
                     yield f"data: {json.dumps({'type': 'done', 'input_tokens': state.total_input_tokens, 'output_tokens': state.total_output_tokens})}\n\n"
             except Exception as e:
                 # if attempt == 1 and current_config.fallback_display_name:
@@ -118,8 +136,10 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
                 #             yield event
                 #         return
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Execution failed', 'details': str(e)})}\n\n"
+            new_turn_messages = state.chat_request_messages[history_length:]
+            if new_turn_messages:
+                background_tasks.add_task(redis_client.store_turn, chat_id=request.chat_id, new_messages=new_turn_messages)
         return StreamingResponse(execute_with_fallback(db_config), media_type="text/event-stream")
-
     except Exception as e:
         return JSONResponse(status_code=500,content={"message": "Critical server error in chat endpoint", "error": str(e),"status_code": 500})
 

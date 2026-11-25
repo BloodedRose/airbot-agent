@@ -72,7 +72,19 @@
     </div>
 
     <script>
+        // --- Session & Memory Initialization ---
+        function generateUUID() {
+            if (crypto && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
         let chatHistory = [];
+        let currentChatId = generateUUID(); // Generates fresh ID on page load
         const API_BASE = "http://127.0.0.1:8000";
 
         // --- Utilities ---
@@ -123,6 +135,7 @@
 
         function clearHistory() {
             chatHistory = [];
+            currentChatId = generateUUID(); // Regenerate UUID for a completely new session
             document.getElementById("chatBox").innerHTML = '';
         }
 
@@ -153,7 +166,6 @@
                 const blob = await res.blob();
                 const blobUrl = window.URL.createObjectURL(blob);
 
-                // Force download with the exact artifact filename (preserves .xlsx, .csv, etc.)
                 const link = document.createElement("a");
                 link.href = blobUrl;
                 link.download = filename || fileId;
@@ -161,7 +173,6 @@
                 link.click();
                 link.remove();
 
-                // Clean up object URL after browser starts the download
                 setTimeout(() => window.URL.revokeObjectURL(blobUrl), 3000);
 
                 if (statusEl) {
@@ -221,8 +232,6 @@
             });
 
             parentContainer.appendChild(card);
-
-            // Auto-trigger download immediately
             triggerFileDownload(fileId, filename, statusId);
         }
 
@@ -231,7 +240,6 @@
             const container = document.getElementById(containerId);
             if (!container) return;
 
-            // Smooth Loading Skeleton + Spinner
             container.innerHTML = `
                 <div class="p-4 bg-white">
                     <div class="flex items-center gap-3 mb-3">
@@ -246,11 +254,7 @@
                     </div>
                 </div>`;
 
-            // Format ID: file_id + "_" + filename (without .json)
-            const cleanFilename = filename.endsWith('.json') ? filename.slice(0, -5) : filename;
-            // const combinedId = `${fileId}_${cleanFilename}`;
             const combinedId = `${fileId}`;
-
 
             try {
                 const res = await fetch(`${API_BASE}/v1/get_table_response/`, {
@@ -281,7 +285,6 @@
                 return;
             }
 
-            // Extract headers (excluding SAP __metadata)
             const headers = Object.keys(records[0]).filter(key => key !== "__metadata");
             const safeFileId = escapeHTML(fileId);
             const safeFilename = escapeHTML(filename);
@@ -294,7 +297,6 @@
                     <div class="flex items-center gap-3">
                         <span class="text-xs text-slate-500 font-medium">${pageInfo.total_records ?? records.length} records</span>
                         
-                        <!-- EXPORT DROPDOWN -->
                         <select onchange="triggerTableExport('${safeFileId}', '${safeFilename}', this.value, this)" 
                                 class="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-sm">
                             <option value="">Export As...</option>
@@ -332,7 +334,6 @@
                     </table>
                 </div>`;
 
-            // Pagination Footer
             const currentPage = pageInfo.current_page || 1;
             const totalPages = pageInfo.total_pages || 1;
             const totalRecords = pageInfo.total_records || records.length;
@@ -374,17 +375,21 @@
 
             input.value = "";
             appendMessage("user", text);
+            
+            // Push locally for rendering (Optional now since backend manages state, but keeps UI happy)
             chatHistory.push({ role: "user", content: text });
 
+            // Updated Payload: Sending 'chat_id' and 'user_text' natively!
             const payload = {
+                chat_id: currentChatId,
+                user_text: text,
                 user_email: userEmail,
                 model_name: document.getElementById("modelName").value || "gpt-4o",
                 mcp_server_names: document.getElementById("mcpNames").value
                     ? document.getElementById("mcpNames").value.split(",").map(s => s.trim()).filter(Boolean)
                     : [],
                 planner: document.getElementById("plannerToggle").checked,
-                stream: true,
-                messages: chatHistory
+                stream: true
             };
 
             const responseDiv = appendMessage("assistant", "");
@@ -393,7 +398,7 @@
             let fullAssistantText = "";
             let currentTextSpan = null;
             let currentSpanBuffer = "";
-            const pendingToolBlocks = []; // FIFO queue to pair tool_call -> tool_result cleanly
+            const pendingToolBlocks = [];
 
             try {
                 const res = await fetch(`${API_BASE}/v1/chat`, {
@@ -443,7 +448,6 @@
                             currentTextSpan.textContent = currentSpanBuffer;
                         }
                         else if (data.type === "tool_call") {
-                            // Close current text block so post-tool text renders below the tool/table/attachment
                             currentTextSpan = null;
 
                             const toolDetails = document.createElement("details");
@@ -476,18 +480,15 @@
                         else if (data.type === "tool_result") {
                             currentTextSpan = null;
 
-                            // Find matching tool block (or fallback to oldest pending block)
                             let matchIdx = pendingToolBlocks.findIndex(item => item.name === data.name);
                             if (matchIdx === -1) matchIdx = 0;
                             const toolEntry = pendingToolBlocks.length ? pendingToolBlocks.splice(matchIdx, 1)[0] : null;
 
-                            // Parse stringified JSON from tool if applicable
                             let parsedResult = data.result;
                             if (typeof data.result === "string") {
                                 try { parsedResult = JSON.parse(data.result); } catch (e) {}
                             }
 
-                            // 1. ALWAYS show the raw tool response inside the tool block's result section
                             if (toolEntry && toolEntry.el) {
                                 const resDiv = toolEntry.el.querySelector(".tool-result");
                                 const formattedRaw = formatRawResultForToolBox(data.result, parsedResult);
@@ -504,7 +505,6 @@
                                 `;
                             }
 
-                            // 2. Separately render rich UI components in the main chat bubble based on response_type / preview_type
                             if (parsedResult && parsedResult.response_type === "file" && Array.isArray(parsedResult.artifacts)) {
                                 for (const artifact of parsedResult.artifacts) {
                                     if (artifact.preview_type === "table") {
@@ -519,18 +519,15 @@
                                     else if (artifact.preview_type === "attachment") {
                                         renderAttachmentCard(contentContainer, artifact, parsedResult.data || {});
                                     }
-                                    // Future file preview types (e.g., pdf, image) can be added here
                                 }
                             }
                             else if (parsedResult && parsedResult.response_type === "chart") {
                                 const chartId = `chart_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
                                 
-                                // Create container in the main chat bubble
                                 const mainChartContainer = document.createElement("div");
                                 mainChartContainer.id = `${chartId}_container`;
                                 mainChartContainer.className = "w-full mt-3 mb-2 animate-fade-in shadow-sm border border-slate-200 rounded-xl overflow-hidden bg-white";
                                 
-                                // 1. Set the initial loading placeholder
                                 mainChartContainer.innerHTML = `
                                     <div class="p-8 flex flex-col items-center justify-center gap-3 bg-slate-50 h-[300px]">
                                         <div class="loader"></div>
@@ -540,9 +537,7 @@
                                 contentContainer.appendChild(mainChartContainer);
                                 scrollToBottom();
 
-                                // 2. Wait 2 seconds, then render the actual chart
                                 setTimeout(() => {
-                                    // Inject header and the actual Plotly target div
                                     mainChartContainer.innerHTML = `
                                         <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                                             <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -552,12 +547,10 @@
                                         <div id="${chartId}" class="w-full h-[400px] p-2 bg-white"></div>
                                     `;
                                     
-                                    // Check if Plotly loaded, then render
                                     if (typeof Plotly !== 'undefined' && parsedResult.plotly_data) {
                                         const plotData = parsedResult.plotly_data.data || [];
                                         const plotLayout = parsedResult.plotly_data.layout || {};
                                         
-                                        // Force it to fit nicely in the chat window
                                         plotLayout.autosize = true;
                                         plotLayout.margin = { l: 40, r: 20, t: 40, b: 40 };
                                         
@@ -632,11 +625,10 @@
             if (e.key === "Enter") sendMessage();
         }
 
-    // --- Table Export Logic ---
+        // --- Table Export Logic ---
         async function triggerTableExport(fileId, filename, format, selectElement) {
-            if (!format) return; // Ignore placeholder selection
+            if (!format) return; 
             
-            // Reset the dropdown back to "Export As..."
             if (selectElement) selectElement.value = "";
             
             const url = `${API_BASE}/v1/files/${encodeURIComponent(fileId)}?export=true&export_format=${encodeURIComponent(format)}`;
@@ -648,7 +640,6 @@
                 const blob = await res.blob();
                 const blobUrl = window.URL.createObjectURL(blob);
                 
-                // Construct clean filename (swap .json to the new format)
                 const cleanName = filename.substring(0, filename.lastIndexOf('.')) || filename;
                 const exportFilename = `${cleanName}.${format}`;
                 

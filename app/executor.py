@@ -21,16 +21,26 @@ async def execute_plan(state: StateTracker, llm_provider: BaseLLMProvider, avail
         if not state.plan or not state.plan.tasks:
             yield f"data: {json.dumps({'type': 'info', 'message': 'No tasks to execute.'})}\n\n"
             return
+        if not hasattr(state, 'artifact_registry'):
+            state.artifact_registry = {}
+
         for task in state.plan.tasks:
             task.status = "in_progress"
             yield f"data: {json.dumps({'type': 'task_start', 'task_id': task.task_id, 'description': task.description})}\n\n"
+            artifact_context = ""
+            if state.artifact_registry:
+                artifact_context = "Active Session Artifacts (You can use these file_ids in your tools):\n"
+                for fid, details in state.artifact_registry.items():
+                    artifact_context += f"- File ID: {fid} | Query/Type: {details.get('query', details.get('type', 'N/A'))}\n"
+
             system_prompt = (
                 f"You are executing Task {task.task_id}: {task.description}\n\n"
                 f"{_build_execution_context(state)}\n\n"
+                f"{artifact_context}\n"
                 "Evaluate the task and use the available tools to complete it."
             )
             messages = [Message(role="system", content=system_prompt)]
-            messages.extend(state.chat_request.messages)
+            messages.extend(state.chat_request_messages) 
             agent_result = await llm_provider.invoke_tool_agent(messages, available_tools)
             if isinstance(agent_result, dict) and "error" in agent_result:
                 yield f"data: {json.dumps({'type': 'error', 'details': agent_result})}\n\n"
@@ -49,7 +59,6 @@ async def execute_plan(state: StateTracker, llm_provider: BaseLLMProvider, avail
             for tc in agent_result.tool_calls: # Second loop to do our manual maskings, tool diversion.
                 if tc.name == "export_dataset":
                     execution_result = await export_dataset(file_id=tc.args.get("file_id"), export_type=tc.args.get("export_type"))
-                    print(execution_result)
                 else:
                     execution_result = await tool_registry.execute(tc.name, tc.args)
                 llm_friendly_result = execution_result
@@ -71,14 +80,18 @@ async def execute_plan(state: StateTracker, llm_provider: BaseLLMProvider, avail
                             f_id = artifact.get('file_id')
                             query = artifact.get('odata_query', 'N/A')
                             file_url = f"http://127.0.0.1:8000/v1/files/{f_id}"
-                            artifact_summaries.append(f"File ID: {f_id} (Query: {query}) - Download: {file_url}")     
+                            artifact_summaries.append(f"File ID: {f_id} (Query: {query}) - Download: {file_url}")
+                            # Save new OData files to the Global Registry
+                            state.artifact_registry[f_id] = {"query": query, "filename": artifact.get("filename", "")}
                         artifacts_str = " | ".join(artifact_summaries)
                         llm_friendly_result = f"Data retrieved successfully. Tell the user they can download it. Do not show sample data. Artifacts available: {artifacts_str}"
                     elif parsed_result.get("response_type") == "file":
                         artifact_details = parsed_result.get("artifacts", [{}])
                         f_id = artifact_details[0].get('file_id')
                         file_url = f"http://127.0.0.1:8000/v1/files/{f_id}"
-                        llm_friendly_result = f"The file has been generated in the desired format and already sent to the UI for download. Tell the user they can download it here: {file_url} and this is the file_id of file where data is stored: {f_id}"  
+                        llm_friendly_result = f"The file has been generated in the desired format and already sent to the UI for download. Tell the user they can download it here: {file_url} and this is the file_id of file where data is stored: {f_id}"
+                        # Save exported files to the Global Registry
+                        state.artifact_registry[f_id] = {"type": "exported_file", "filename": artifact_details[0].get("filename", "")}
                     elif parsed_result.get("response_type") == "chart" or "plotly_data" in parsed_result:
                         llm_friendly_result = "Chart generated successfully and is already displayed on the user's screen. Acknowledge this, but do not output any chart data."
                 yield f"data: {json.dumps({'type': 'tool_result', 'name': tc.name, 'result': ui_stream_result})}\n\n"

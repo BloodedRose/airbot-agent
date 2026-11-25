@@ -3,6 +3,10 @@ import pandas as pd
 from typing import Literal
 from pathlib import Path
 from app.tools.database_repositry import save_artifact, get_artifact
+from dotenv import load_dotenv
+load_dotenv()
+
+SANDBOX_URL = os.environ["SANDBOX_URL"]
 
 MIME = {
     "csv": "text/csv",
@@ -185,7 +189,7 @@ async def get_file_schema(file_id:str)-> dict:
 async def load_file_generate_chart(file_id:str, code:str)->dict:
     try:
         file_data = await get_artifact(file_id=file_id)
-        sandbox_url = "http://localhost:8001/execute"
+        sandbox_url = SANDBOX_URL
         async with httpx.AsyncClient() as client:
             with open(file_data.storage_path, "rb") as f:
                 files = {"file": ("dataset.json", f, "application/json")}

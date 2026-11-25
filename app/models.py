@@ -48,11 +48,12 @@ class Message(BaseModel):
     tool_result: Optional[Any] = None
 
 class ChatRequest(BaseModel):
-    messages: List[Message]
+    user_text: str = Field(..., description="The new message from the user")
+    chat_id :str 
     model_name: str = Field(..., description="The display name of the model")
     mcp_server_names: List[str] = Field(default=[], description="List of MCP server names to connect")
     stream: bool = Field(default=True)
-    user_email: str = Field(..., description="Used for access validation (until you implement JWTs)")
+    user_email: str = Field(..., description="Used for access validation")
     planner: bool = Field(default=False, description="True for Plan-and-Execute, False for ReAct")
 
 # --- Internal Agent State Models ---
@@ -70,6 +71,8 @@ class Plan(BaseModel):
 
 class StateTracker(BaseModel):
     chat_request: ChatRequest
+    chat_request_messages: List[Message] = Field(default_factory=list)
+    artifact_registry: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     plan: Optional[Plan] = None
     execution_history: List[Task] = []
     total_input_tokens: int = 0
